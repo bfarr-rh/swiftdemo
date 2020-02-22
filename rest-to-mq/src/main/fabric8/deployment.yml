@@ -1,0 +1,67 @@
+spec:
+  name: ${project.artifactId}
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "true"
+      labels:
+        app: ${project.artifactId}
+        version: ${ocp-version}
+    spec:
+      containers:
+        - 
+          resources:
+            requests:
+              cpu: "0.3"
+              memory: 256Mi
+            limits:
+              cpu: "1.0"
+              memory: 768Mi
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /actuator/health
+              port: 8081
+              scheme: HTTP
+            initialDelaySeconds: 180
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 3
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /actuator/health
+              port: 8081
+              scheme: HTTP
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 3
+          env:
+          - name: IBMMQ_HOST
+            value: mq
+          - name: IBMMQ_PORT
+            value: 1414
+          - name: IBMMQ_QM
+            value: QM1
+          - name: IBMMQ_CHANNEL
+            value: DEV.APP.SVRCONN
+          - name: AMQ_URI
+            value: tcp://ex-aao-hdls-svc:61626?jms.tracing=opentracing
+          - name: AMQ_USER
+            value: admin
+          - name: AMQ_PASSWORD
+            value: admin
+          - name: JAEGER_SERVICE_NAME
+            value: rest-to-mq
+          - name: JAEGER_SAMPLER_PARAM
+            value: 1
+          - name: JAEGER_ENDPOINT
+            value: https://jaeger-istio-system.apps.cluster-nab-372b.nab-372b.example.opentlc.com/api/traces
+          - name: URI_QUEUE_MXIN
+            value: ibmmq:DEV.QUEUE.2?disableReplyTo=true
+          - name: URI_QUEUE_MTIN
+            value: ibmmq:DEV.QUEUE.1?disableReplyTo=true
+          - name: AMQ_URI_QUEUE_MXIN
+            value: activemq:queue:mxin
+          

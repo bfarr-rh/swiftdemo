@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd        http://camel.apache.org/schema/spring       http://camel.apache.org/schema/spring/camel-spring.xsd">
+    <!-- IBM -->
+    <bean
+        class="org.springframework.jms.connection.JmsTransactionManager" id="ibmTransactionManager">
+        <property name="connectionFactory" ref="ibmMqQueueConnectionFactory"/>
+    </bean>
+    <bean class="org.mycompany.JMSExceptionListener" id="jmsExceptionListener"/>
+    <bean class="com.ibm.mq.jms.MQConnectionFactory" id="ibmMqQueueConnectionFactory">
+        <property name="transportType" value="1"/>
+        <property name="hostName" value="${IBMMQ_HOST}"/>
+        <property name="port" value="${IBMMQ_PORT}"/>
+        <property name="queueManager" value="${IBMMQ_QM}"/>
+        <property name="channel" value="${IBMMQ_CHANNEL}"/>
+        <property name="useConnectionPooling" value="true"/>
+    </bean>
+    <bean class="org.apache.camel.component.jms.JmsConfiguration" id="ibmJmsConfiguration">
+        <property name="connectionFactory" ref="ibmMqQueueConnectionFactory"/>
+        <property name="transactionManager" ref="ibmTransactionManager"/>
+        <property name="transacted" value="true"/>
+        <property name="explicitQosEnabled" value="true"/>
+        <property name="jmsMessageType" value="Text"/>
+        <property name="exceptionListener" ref="jmsExceptionListener"/>
+    </bean>
+    <bean class="org.apache.camel.component.jms.JmsComponent" id="ibmmq">
+        <property name="connectionFactory" ref="ibmMqQueueConnectionFactory"/>
+        <property name="configuration" ref="ibmJmsConfiguration"/>
+    </bean>
+    <bean
+        class="org.apache.camel.component.micrometer.routepolicy.MicrometerRoutePolicyFactory" id="metricsRoutePolicyFactory"/>
+    <bean
+        class="org.apache.camel.component.micrometer.messagehistory.MicrometerMessageHistoryFactory" id="metricsMessageHistoryFactory"/>
+    <bean
+        class="org.apache.camel.component.micrometer.routepolicy.MicrometerRoutePolicy" id="policy"/>
+    <camelContext id="camel" trace="true" xmlns="http://camel.apache.org/schema/spring">
+        <onException>
+            <exception>java.lang.Exception</exception>
+            <handled>
+                <constant>true</constant>
+            </handled>
+            <log message="Error in processing ${body}"/>
+        </onException>
+        <restConfiguration bindingMode="auto" contextPath="/mt"
+            enableCORS="true" port="8080">
+            <apiProperty key="cors" value="true"/>
+            <apiProperty key="api.title" value="Legacy MT Processing"/>
+            <apiProperty key="api.version" value="1.0.0"/>
+        </restConfiguration>
+        <route autoStartup="true" id="from-ibmmq-mt" routePolicyRef="policy">
+            <from id="_fromibmmq" uri="ibmmq:DEV.QUEUE.3"/>
+            <toD id="countmsgtype" uri="micrometer:counter:payments.legacymt.messagetype.${in.header.msgtype}?increment=1"/>
+            <log id="_log1" message="${in.header.msgtype} - Message Type"/>
+            <setHeader headerName="CamelFileName" id="_setHeader3">
+                <simple>${header.JMSMessageID}.${in.header.msgtype}.txt</simple>
+            </setHeader>
+            <to id="mtto-dir" uri="file://mtout?noop=true"/>
+        </route>
+        <route id="httpprocessingRoute" routePolicyRef="policy">
+            <from id="_from1" uri="direct:httpprocessingRoute"/>
+            <to id="read-dir" uri="file://mtout?noop=true"/>
+            <convertBodyTo charset="utf-8" id="_convertBodyTo1" type="java.lang.String"/>
+            <setHeader headerName="Access-Control-Allow-Methods" id="_setHeader5">
+                <constant>POST, GET, OPTIONS</constant>
+            </setHeader>
+            <setHeader headerName="Access-Control-Allow-Origin" id="_setHeader6">
+                <constant>*</constant>
+            </setHeader>
+            <setHeader headerName="Access-Control-Allow-Headers" id="_setHeader7">
+                <constant>x-requested-with</constant>
+            </setHeader>
+        </route>
+    </camelContext>
+</beans>

@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd        http://camel.apache.org/schema/spring       http://camel.apache.org/schema/spring/camel-spring.xsd">
+    <!-- IBM -->
+    <bean
+        class="org.springframework.jms.connection.JmsTransactionManager" id="ibmTransactionManager">
+        <property name="connectionFactory" ref="ibmMqQueueConnectionFactory"/>
+    </bean>
+    <bean class="org.mycompany.JMSExceptionListener" id="jmsExceptionListener"/>
+    <bean class="com.ibm.mq.jms.MQConnectionFactory" id="ibmMqQueueConnectionFactory">
+        <property name="transportType" value="1"/>
+        <property name="hostName" value="${IBMMQ_HOST}"/>
+        <property name="port" value="${IBMMQ_PORT}"/>
+        <property name="queueManager" value="${IBMMQ_QM}"/>
+        <property name="channel" value="${IBMMQ_CHANNEL}"/>
+        <property name="useConnectionPooling" value="true"/>
+    </bean>
+    <bean class="org.apache.camel.component.jms.JmsConfiguration" id="ibmJmsConfiguration">
+        <property name="connectionFactory" ref="ibmMqQueueConnectionFactory"/>
+        <property name="transactionManager" ref="ibmTransactionManager"/>
+        <property name="transacted" value="true"/>
+        <property name="explicitQosEnabled" value="true"/>
+        <property name="jmsMessageType" value="Text"/>
+        <property name="exceptionListener" ref="jmsExceptionListener"/>
+    </bean>
+    <bean class="org.apache.camel.component.jms.JmsComponent" id="ibmmq">
+        <property name="connectionFactory" ref="ibmMqQueueConnectionFactory"/>
+        <property name="configuration" ref="ibmJmsConfiguration"/>
+    </bean>
+    <bean
+        class="org.apache.camel.component.micrometer.routepolicy.MicrometerRoutePolicyFactory" id="metricsRoutePolicyFactory"/>
+    <bean
+        class="org.apache.camel.component.micrometer.messagehistory.MicrometerMessageHistoryFactory" id="metricsMessageHistoryFactory"/>
+    <bean
+        class="org.apache.camel.component.micrometer.routepolicy.MicrometerRoutePolicy" id="policy"/>
+    <camelContext id="camel" trace="true" xmlns="http://camel.apache.org/schema/spring">
+        <onException>
+            <exception>java.lang.Exception</exception>
+            <handled>
+                <constant>true</constant>
+            </handled>
+            <log message="Error in processing ${body}"/>
+        </onException>
+        <route autoStartup="true" id="from-ibmmq-mt" routePolicyRef="policy">
+            <from id="_fromibmmq" uri="ibmmq:DEV.QUEUE.2"/>
+            <log id="_log1" message="${in.header.msgtype} - Message Type"/>
+            <to id="_to2" uri="direct:mxprocessingRoute"/>
+            <to id="_tomtqueue" uri="ibmmq:DEV.QUEUE.3?disableReplyTo=true"/>
+        </route>
+        <route id="mxprocessingRoute" routePolicyRef="policy">
+            <from id="_frommx" uri="direct:mxprocessingRoute"/>
+            <toD id="countmsgtype" uri="micrometer:counter:payments.mxprocessingRoute.messagetype.${in.header.msgtype}?increment=1"/>
+            <choice id="_choicemx">
+                <when id="_whenmx1">
+                    <simple>${in.header.msgtype} == 'pain01'</simple>
+                    <to id="mxtxfmrprocess" uri="txfrmr:mxToMt/pain01toMt101"/>
+                    <setHeader headerName="msgtype" id="_setHeader4">
+                        <simple>mt101</simple>
+                    </setHeader>
+                </when>
+                <when id="_whenmx2">
+                    <simple>${in.header.msgtype} == 'pacs08'</simple>
+                    <to id="mx8txfmrprocess" uri="txfrmr:mxToMt/pacs08toMt103"/>
+                    <setHeader headerName="msgtype" id="_setHeader4">
+                        <simple>mt103</simple>
+                    </setHeader>
+                </when>
+                <otherwise id="_otherwise1">
+                    <log id="mxroute-log" message="Unable to process >>> ${in.header.msgtype} - ${body}"/>
+                </otherwise>
+            </choice>
+        </route>
+    </camelContext>
+</beans>

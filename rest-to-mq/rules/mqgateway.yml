@@ -1,0 +1,15 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: mq-active
+spec:
+  hosts:
+  - mq-active
+  tcp:
+  - match:
+    - port: 1414
+    route:
+    - destination:
+        host: mq-backup
+        port:
+          number: 1414

@@ -1,0 +1,53 @@
+spec:
+  template:
+    metadata:
+      annotations:
+        sidecar.istio.io/inject: "true"
+      labels:
+        app: ${project.artifactId}
+        version: v1
+    spec:
+      containers:
+        - 
+          resources:
+            requests:
+              cpu: "0.3"
+#              memory: 256Mi
+            limits:
+              cpu: "1.0"
+#             memory: 256Mi
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /actuator/health
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 3
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /actuator/health
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 3
+          env:
+          - name: IBMMQ_HOST
+            value: mq
+          - name: IBMMQ_PORT
+            value: 1414
+          - name: IBMMQ_QM
+            value: QM1
+          - name: IBMMQ_CHANNEL
+            value: DEV.APP.SVRCONN
+          - name: JAEGER_SERVICE_NAME
+            value: mx-to-mt-transform
+          - name: JAEGER_SAMPLER_PARAM
+            value: 1
+          - name: JAEGER_ENDPOINT
+            value: https://jaeger-istio-system.apps.cluster-nab-372b.nab-372b.example.opentlc.com/api/traces

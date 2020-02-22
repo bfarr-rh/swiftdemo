@@ -1,0 +1,3 @@
+default.configuration=rest-to-mq
+eclipse.preferences.version=1
+hibernate3.enabled=true

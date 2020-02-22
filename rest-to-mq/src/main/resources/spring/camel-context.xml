@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="        http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd        http://camel.apache.org/schema/spring       http://camel.apache.org/schema/spring/camel-spring.xsd">
+    <!-- IBM -->
+    <bean
+        class="org.springframework.jms.connection.JmsTransactionManager" id="ibmTransactionManager">
+        <property name="connectionFactory" ref="ibmMqQueueConnectionFactory"/>
+    </bean>
+    <bean class="org.mycompany.JMSExceptionListener" id="jmsExceptionListener"/>
+    <bean class="com.ibm.mq.jms.MQConnectionFactory" id="ibmMqQueueConnectionFactory">
+        <property name="transportType" value="1"/>
+        <property name="hostName" value="${IBMMQ_HOST}"/>
+        <property name="port" value="${IBMMQ_PORT}"/>
+        <property name="queueManager" value="${IBMMQ_QM}"/>
+        <property name="channel" value="${IBMMQ_CHANNEL}"/>
+        <!-- property name="useConnectionPooling" value="true"/> -->
+    </bean>
+    <bean class="org.apache.camel.component.jms.JmsConfiguration" id="ibmJmsConfiguration">
+        <property name="connectionFactory" ref="ibmMqQueueConnectionFactory"/>
+        <property name="transactionManager" ref="ibmTransactionManager"/>
+        <property name="transacted" value="true"/>
+        <property name="explicitQosEnabled" value="true"/>
+        <property name="jmsMessageType" value="Text"/>
+        <property name="exceptionListener" ref="jmsExceptionListener"/>
+    </bean>
+    <bean class="org.apache.camel.component.jms.JmsComponent" id="ibmmq">
+        <property name="connectionFactory" ref="ibmMqQueueConnectionFactory"/>
+        <property name="configuration" ref="ibmJmsConfiguration"/>
+    </bean>
+    <!-- configure the camel activemq component to use the current broker
+    <bean class="org.apache.activemq.camel.component.ActiveMQComponent" id="activemq">
+        <property name="connectionFactory">
+            <bean class="org.apache.activemq.ActiveMQConnectionFactory">
+                <property name="brokerURL" value="${AMQ_URI}"/>
+                <property name="userName" value="${AMQ_USER}"/>
+                <property name="password" value="${AMQ_PASSWORD}"/>
+            </bean>
+        </property>
+    </bean>  -->
+    <bean
+        class="org.apache.camel.processor.idempotent.MemoryIdempotentRepository" id="myRepo"/>
+    <bean
+        class="org.apache.camel.component.micrometer.routepolicy.MicrometerRoutePolicyFactory" id="metricsRoutePolicyFactory"/>
+    <bean
+        class="org.apache.camel.component.micrometer.messagehistory.MicrometerMessageHistoryFactory" id="metricsMessageHistoryFactory"/>
+    <bean
+        class="org.apache.camel.component.micrometer.routepolicy.MicrometerRoutePolicy" id="policy"/>
+    <!-- complex <bean class="org.apache.camel.processor.idempotent.kafka.KafkaIdempotentRepository" 
+		id="insertDbIdemRepo"> <property name="topic" value="idempotent-db-inserts"/> 
+		<property name="maxCacheSize" value="10000"/> <property name="consumerConfig"> 
+		<props> <prop key="bootstrap.servers">amqstreamsbootstrap-amqstreams.apps.cluster-nab-4b69.nab-4b69.example.opentlc.com</prop> 
+		</props> </property> <property name="producerConfig"> <props> <prop key="bootstrap.servers">amqstreamsbootstrap-amqstreams.apps.cluster-nab-4b69.nab-4b69.example.opentlc.com</prop> 
+		</props> </property> </bean> -->
+    <camelContext id="camel" trace="true" xmlns="http://camel.apache.org/schema/spring">
+        <onException>
+            <exception>java.lang.Exception</exception>
+            <handled>
+                <constant>true</constant>
+            </handled>
+            <log message="Error in processing ${body}"/>
+        </onException>
+        <route id="mthttp" routePolicyRef="policy">
+            <from id="_from3" uri="undertow:http://0.0.0.0:8080/mt/{msgtype}/{uetr}?accessLog=true"/>
+            <setHeader headerName="msgtype" id="_setHeader1">
+                <simple resultType="String">${in.header.msgtype}</simple>
+            </setHeader>
+            <setHeader headerName="uetr" id="_setHeader2">
+                <simple resultType="String">${in.header.uetr}</simple>
+            </setHeader>
+            <toD id="countmsgtype-mthttp" uri="micrometer:counter:messagetype.${in.header.msgtype}?increment=1"/>
+            <idempotentConsumer id="_idempotentConsumer1" messageIdRepositoryRef="myRepo">
+                <!-- use the messageId header as key for identifying duplicate messages -->
+                <header>uetr</header>
+                <!-- if not a duplicate send it to this endpoint -->
+                <to id="_tomt" uri="{{URI_QUEUE_MTIN}}"/>
+            </idempotentConsumer>
+        </route>
+        <route id="mxhttp" routePolicyRef="policy">
+            <from id="_from4" uri="undertow:http://0.0.0.0:8080/mx/{msgtype}/{uetr}?accessLog=true"/>
+            <setHeader headerName="msgtype" id="_setHeader3">
+                <simple resultType="String">${in.header.msgtype}</simple>
+            </setHeader>
+            <setHeader headerName="uetr" id="_setHeader4">
+                <simple resultType="String">${in.header.uetr}</simple>
+            </setHeader>
+            <toD id="countmsgtype-mxhttp" uri="micrometer:counter:payments.mxhttp.messagetype.${in.header.msgtype}?increment=1"/>
+            <to id="_tomx" uri="{{URI_QUEUE_MXIN}}"/>
+        </route>
+        <route id="_batchroute1" routePolicyRef="policy">
+            <from id="_from5" uri="undertow:http://0.0.0.0:8080/mxbatch/{msgtype}/{uetr}?accessLog=true"/>
+            <convertBodyTo charset="utf-8" id="_convertBodyToBatch" type="java.lang.byte[]"/>
+            <setHeader headerName="msgtype" id="_setHeader3b">
+                <simple resultType="String">${in.header.msgtype}</simple>
+            </setHeader>
+            <setHeader headerName="uetr" id="_setHeader4b">
+                <simple resultType="String">${in.header.uetr}</simple>
+            </setHeader>
+            <split id="_split1" parallelProcessing="true" streaming="true">
+                <tokenize token="\r\n~\r\n|\n~" trim="true"/>
+                <log id="_log5" message="Sending message to IBMMQ ${body}"/>
+                <toD id="countbatchmsgtype-mxhttp" uri="micrometer:counter:payments.batchmxhttp.messagetype.${in.header.msgtype}?increment=1"/>
+                <to id="_tobatchmx" uri="{{URI_QUEUE_MXIN}}"/>
+            </split>
+        </route>
+    </camelContext>
+    <bean class="org.apache.camel.component.undertow.UndertowComponent" id="undertow">
+        <property name="hostOptions" ref="undertowHostOptions"/>
+    </bean>
+    <bean
+        class="org.apache.camel.component.undertow.UndertowHostOptions" id="undertowHostOptions">
+        <property name="http2Enabled" value="true"/>
+    </bean>
+</beans>
